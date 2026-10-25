@@ -101,6 +101,8 @@ class RankedFragmentResponse(BaseModel):
     page_to: int | None
     section: str | None
     rerank_score: float
+    dense_rank: int | None = Field(description="Место фрагмента в плотной ветви; null — ветвь его не нашла")
+    sparse_rank: int | None = Field(description="Место фрагмента в ветви BM25; null — ветвь его не нашла")
     used_in_context: bool
 
     @classmethod
@@ -111,6 +113,8 @@ class RankedFragmentResponse(BaseModel):
             page_to=fragment.page_to,
             section=fragment.section,
             rerank_score=fragment.rerank_score,
+            dense_rank=fragment.dense_rank,
+            sparse_rank=fragment.sparse_rank,
             used_in_context=fragment.used_in_context,
         )
 

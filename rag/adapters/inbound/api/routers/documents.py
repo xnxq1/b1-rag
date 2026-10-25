@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from http import HTTPStatus
 from typing import Annotated, ClassVar
+from uuid import UUID
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
@@ -69,10 +70,9 @@ class DocumentsRouter(BaseRouter):
             summary="Ответ на вопрос по документу со ссылками на фрагменты",
         )
         async def ask(
-            doc_id: str,
+            doc_id: UUID,
             body: AskRequest,
             debug: Annotated[bool, Query(description="Добавить диагностику поиска")] = False,
         ) -> AnswerResponse:
-            # TODO: тут нужно убирать debug параметр для прода
-            result = await self._ask_question.execute(doc_id, body.question, debug=debug)
+            result = await self._ask_question.execute(str(doc_id), body.question, debug=debug)
             return AnswerResponse.from_result(result)

@@ -12,7 +12,13 @@ from rag.application.ports import (
 )
 from rag.application.use_cases.upload_document import stored_file_name
 from rag.domain.entities import Document, IndexingStage, IndexingTask, TaskStatus
-from rag.domain.exceptions import DomainError, EmptyDocumentError, ExternalServiceUnavailableError, TaskNotFoundError
+from rag.domain.exceptions import (
+    DomainError,
+    EmptyDocumentError,
+    ExternalServiceUnavailableError,
+    TaskNotFoundError,
+    TooManyPagesError,
+)
 from rag.domain.layout import build_chunks
 
 logger = logging.getLogger(__name__)
@@ -32,6 +38,7 @@ class IndexDocument:
         sparse: SparseEncoderPort,
         vector_store: VectorStorePort,
         embedding_batch_size: int,
+        max_pages: int,
     ) -> None:
         self._statuses = statuses
         self._storage = storage
@@ -41,6 +48,7 @@ class IndexDocument:
         self._sparse = sparse
         self._vector_store = vector_store
         self._batch_size = embedding_batch_size
+        self._max_pages = max_pages
 
     async def execute(self, task_id: str, last_attempt: bool = True) -> None:
         task = await self._statuses.get(task_id)
@@ -77,6 +85,9 @@ class IndexDocument:
         if not parsed.text.strip():
             msg = "Не удалось извлечь текст из документа (возможно, это скан без текстового слоя)"
             raise EmptyDocumentError(msg)
+        if parsed.pages_total is not None and parsed.pages_total > self._max_pages:
+            msg = f"Страниц в документе: {parsed.pages_total}, допустимо не больше {self._max_pages}"
+            raise TooManyPagesError(msg)
 
         await self._advance(task, IndexingStage.CHUNKING, 0.15)
         spans = self._chunker.split(parsed.text)

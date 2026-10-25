@@ -10,6 +10,8 @@ class RankedFragment:
     page_to: int | None
     section: str | None
     rerank_score: float
+    dense_rank: int | None
+    sparse_rank: int | None
     used_in_context: bool
 
 

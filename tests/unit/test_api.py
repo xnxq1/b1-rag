@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -13,6 +14,7 @@ from rag.domain import exceptions
 from rag.domain.entities import AnswerDraft, DraftCitation
 from rag.domain.grounding import NOT_FOUND_MESSAGE
 from tests.fakes import (
+    DOC_ID,
     FakeEmbeddings,
     FakeGenerator,
     FakeQueue,
@@ -87,11 +89,12 @@ async def test_upload_errors(client: AsyncClient) -> None:
     assert unsupported.status_code == 415
     too_large = await client.post("/api/documents", files={"file": ("a.pdf", b"x" * 2048, "application/pdf")})
     assert too_large.status_code == 413
-    assert (await client.get("/api/tasks/unknown")).status_code == 404
+    assert (await client.get(f"/api/tasks/{uuid4()}")).status_code == 404
+    assert (await client.get("/api/tasks/unknown")).status_code == 422
 
 
 async def test_ask_with_debug(client: AsyncClient) -> None:
-    response = await client.post("/api/documents/doc-1/ask?debug=true", json={"question": "Какой штраф?"})
+    response = await client.post(f"/api/documents/{DOC_ID}/ask?debug=true", json={"question": "Какой штраф?"})
     assert response.status_code == 200
     body = response.json()
     assert body["found"] is True
@@ -109,10 +112,11 @@ async def test_ask_with_debug(client: AsyncClient) -> None:
 
 
 async def test_ask_not_found_and_validation(client: AsyncClient) -> None:
-    response = await client.post("/api/documents/doc-1/ask", json={"question": "Кто директор?"})
+    response = await client.post(f"/api/documents/{DOC_ID}/ask", json={"question": "Кто директор?"})
     assert response.json() == {"answer": NOT_FOUND_MESSAGE, "found": False, "citations": [], "diagnostics": None}
-    assert (await client.post("/api/documents/missing/ask", json={"question": "?"})).status_code == 404
-    assert (await client.post("/api/documents/doc-1/ask", json={"question": ""})).status_code == 422
+    assert (await client.post(f"/api/documents/{uuid4()}/ask", json={"question": "?"})).status_code == 404
+    assert (await client.post("/api/documents/doc-1/ask", json={"question": "?"})).status_code == 422
+    assert (await client.post(f"/api/documents/{DOC_ID}/ask", json={"question": ""})).status_code == 422
 
 
 async def test_upload_rejected_by_content_length_before_reading_body(
@@ -129,7 +133,7 @@ async def test_upload_rejected_by_content_length_before_reading_body(
 
 
 async def test_content_length_limit_applies_only_to_upload(client: AsyncClient) -> None:
-    response = await client.post("/api/documents/doc-1/ask", json={"question": "Какой штраф? " * 100})
+    response = await client.post(f"/api/documents/{DOC_ID}/ask", json={"question": "Какой штраф? " * 100})
     assert response.status_code == 200
 
 

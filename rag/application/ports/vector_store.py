@@ -8,8 +8,8 @@ from rag.domain.entities import Chunk, Document, ScoredChunk
 @dataclass(slots=True)
 class HybridSearchResult:
     candidates: list[ScoredChunk]
-    dense_hits: int | None = None
-    sparse_hits: int | None = None
+    dense_ranking: list[int] | None = None
+    sparse_ranking: list[int] | None = None
 
 
 class VectorStorePort(Protocol):

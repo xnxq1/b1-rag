@@ -7,9 +7,11 @@ from rag.domain.exceptions import (
     ExternalServiceUnavailableError,
     FileTooLargeError,
     TaskNotFoundError,
+    TooManyPagesError,
     UnsupportedFileTypeError,
 )
 from tests.fakes import (
+    DOC_ID,
     FakeChunker,
     FakeEmbeddings,
     FakeGenerator,
@@ -44,7 +46,7 @@ async def test_ask_returns_grounded_answer_with_diagnostics() -> None:
     store = FakeVectorStore([make_chunk(0, "Общие положения."), make_chunk(1, PENALTY, page=12, section="4.2")])
     generator = FakeGenerator(AnswerDraft(True, "0,1% в день.", [DraftCitation(1, "неустойку в размере 0,1%")]))
 
-    result = await ask_use_case(store, generator).execute("doc-1", "Какой штраф?", debug=True)
+    result = await ask_use_case(store, generator).execute(DOC_ID, "Какой штраф?", debug=True)
 
     assert result.answer.found
     assert result.answer.citations[0].page == 12
@@ -52,6 +54,10 @@ async def test_ask_returns_grounded_answer_with_diagnostics() -> None:
     diagnostics = result.diagnostics
     assert diagnostics is not None
     assert (diagnostics.dense_hits, diagnostics.sparse_hits, diagnostics.fused_candidates) == (2, 1, 2)
+    penalty = next(f for f in diagnostics.reranked if f.chunk_index == 1)
+    assert (penalty.dense_rank, penalty.sparse_rank) == (2, 1)
+    general = next(f for f in diagnostics.reranked if f.chunk_index == 0)
+    assert (general.dense_rank, general.sparse_rank) == (1, None)
     assert diagnostics.context_fragments == 1
     assert diagnostics.used_in_answer == [1]
     assert diagnostics.llm_called
@@ -61,7 +67,7 @@ async def test_ask_without_relevant_fragments_does_not_call_llm() -> None:
     store = FakeVectorStore([make_chunk(0, "Общие положения."), make_chunk(1, "Порядок приемки.")])
     generator = FakeGenerator()
 
-    result = await ask_use_case(store, generator).execute("doc-1", "Кто генеральный директор?")
+    result = await ask_use_case(store, generator).execute(DOC_ID, "Кто генеральный директор?")
 
     assert not result.answer.found
     assert result.answer.citations == []
@@ -114,7 +120,9 @@ def parsed_document() -> ParsedDocument:
     )
 
 
-async def make_index_case(store: FakeVectorStore) -> tuple[IndexDocument, FakeStatuses, str, FakeStorage]:
+async def make_index_case(
+    store: FakeVectorStore, max_pages: int = 100
+) -> tuple[IndexDocument, FakeStatuses, str, FakeStorage]:
     storage, statuses, queue = FakeStorage(), FakeStatuses(), FakeQueue()
     task = await upload_use_case(storage, statuses, queue).execute("Договор.pdf", bytes_stream(b"%PDF"))
     use_case = IndexDocument(
@@ -126,6 +134,7 @@ async def make_index_case(store: FakeVectorStore) -> tuple[IndexDocument, FakeSt
         sparse=FakeSparse(),
         vector_store=store,
         embedding_batch_size=2,
+        max_pages=max_pages,
     )
     return use_case, statuses, task.task_id, storage
 
@@ -206,4 +215,29 @@ async def test_transient_failure_on_last_attempt_fails_task() -> None:
         await use_case.execute(task_id, last_attempt=True)
 
     assert statuses.tasks[task_id].status == TaskStatus.FAILED
+    assert storage.files == {}
+
+
+async def test_enqueue_failure_marks_task_failed_and_removes_file() -> None:
+    storage, statuses = FakeStorage(), FakeStatuses()
+    queue = FakeQueue(fail=ExternalServiceUnavailableError("Брокер задач недоступен"))
+
+    with pytest.raises(ExternalServiceUnavailableError):
+        await upload_use_case(storage, statuses, queue).execute("Договор.pdf", bytes_stream(b"%PDF"))
+
+    assert storage.files == {}
+    assert [t.status for t in statuses.tasks.values()] == [TaskStatus.FAILED]
+
+
+async def test_document_over_page_limit_fails_without_embedding() -> None:
+    store = FakeVectorStore()
+    use_case, statuses, task_id, storage = await make_index_case(store, max_pages=1)
+
+    with pytest.raises(TooManyPagesError):
+        await use_case.execute(task_id)
+
+    task = statuses.tasks[task_id]
+    assert task.status == TaskStatus.FAILED
+    assert task.error == "Страниц в документе: 2, допустимо не больше 1"
+    assert store.chunks == {}
     assert storage.files == {}

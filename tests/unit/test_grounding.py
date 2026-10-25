@@ -25,11 +25,23 @@ def test_quote_is_located_and_offsets_point_into_document() -> None:
     assert PENALTY[citation.char_start - chunk_start : citation.char_end - chunk_start] == citation.text
 
 
-def test_paraphrased_quote_falls_back_to_whole_fragment() -> None:
+def test_unverified_quote_is_dropped_and_answer_becomes_not_found() -> None:
     draft = AnswerDraft(True, "Штраф 0,1%.", [DraftCitation(1, "штраф составляет одну десятую процента")])
     answer = ground_answer(draft, context())
 
-    assert answer.citations[0].text == PENALTY
+    assert not answer.found
+    assert answer.citations == []
+
+
+def test_only_verified_quotes_remain() -> None:
+    draft = AnswerDraft(
+        True,
+        "Штраф 0,1%.",
+        [DraftCitation(1, "штраф составляет одну десятую процента"), DraftCitation(1, "неустойку в размере 0,1%")],
+    )
+    answer = ground_answer(draft, context())
+
+    assert [c.text for c in answer.citations] == ["неустойку в размере 0,1%"]
 
 
 def test_citation_outside_context_is_dropped_and_answer_becomes_not_found() -> None:
@@ -78,3 +90,24 @@ def test_citation_page_and_section_follow_quote_position_inside_chunk() -> None:
 
     citation = answer.citations[0]
     assert (citation.page, citation.page_to, citation.section) == (3, 3, "4.2 Штрафные санкции")
+
+
+def test_quote_with_changed_word_form_is_located_by_longest_word_run() -> None:
+    text = "1.1. Поставщик обязуется передать\nв собственность Покупателя, АО «Северная верфь», серверное оборудование."
+    located = locate_quote(text, "Покупатель, АО «Северная верфь»")
+    assert located is not None
+    assert text[located[0] : located[1]] == "АО «Северная верфь»"
+
+
+def test_single_word_overlap_is_not_a_quote() -> None:
+    assert locate_quote(PENALTY, "Неустойка определяется законом") is None
+
+
+def test_overlapping_citations_of_same_place_are_merged() -> None:
+    draft = AnswerDraft(
+        True,
+        "0,1%",
+        [DraftCitation(1, "Поставщик уплачивает Покупателю неустойку"), DraftCitation(1, "уплачивает Покупателю")],
+    )
+    answer = ground_answer(draft, context())
+    assert [c.text for c in answer.citations] == ["Поставщик уплачивает Покупателю неустойку"]

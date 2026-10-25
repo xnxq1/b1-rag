@@ -30,6 +30,10 @@ class EmptyDocumentError(DomainError):
     pass
 
 
+class TooManyPagesError(DomainError):
+    pass
+
+
 class DocumentNotFoundError(DomainError):
     pass
 
@@ -39,4 +43,8 @@ class TaskNotFoundError(DomainError):
 
 
 class ExternalServiceUnavailableError(DomainError):
+    pass
+
+
+class InvalidModelResponseError(DomainError):
     pass

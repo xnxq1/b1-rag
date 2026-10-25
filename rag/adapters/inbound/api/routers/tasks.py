@@ -1,4 +1,5 @@
 from typing import ClassVar
+from uuid import UUID
 
 from fastapi import APIRouter
 
@@ -22,5 +23,5 @@ class TasksRouter(BaseRouter):
             responses={404: {"model": ErrorResponse}},
             summary="Состояние фоновой задачи индексации",
         )
-        async def get_task(task_id: str) -> TaskResponse:
-            return TaskResponse.from_domain(await self._get_indexing_status.execute(task_id))
+        async def get_task(task_id: UUID) -> TaskResponse:
+            return TaskResponse.from_domain(await self._get_indexing_status.execute(str(task_id)))

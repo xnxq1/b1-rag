@@ -4,6 +4,7 @@ from rag.application.dto import AskResult, RankedFragment, SearchDiagnostics
 from rag.application.ports import (
     AnswerGeneratorPort,
     EmbeddingsPort,
+    HybridSearchResult,
     RerankerPort,
     SparseEncoderPort,
     VectorStorePort,
@@ -62,25 +63,23 @@ class AskQuestion:
 
         diagnostics = None
         if debug:
-            diagnostics = self._diagnostics(
-                search.dense_hits, search.sparse_hits, len(search.candidates), reranked, context, answer
-            )
+            diagnostics = self._diagnostics(search, reranked, context, answer)
         return AskResult(answer=answer, diagnostics=diagnostics)
 
+    @staticmethod
     def _diagnostics(
-        self,
-        dense_hits: int | None,
-        sparse_hits: int | None,
-        fused: int,
+        search: HybridSearchResult,
         reranked: list[ScoredChunk],
         context: list[ScoredChunk],
         answer: Answer,
     ) -> SearchDiagnostics:
         in_context = {c.chunk.chunk_index for c in context}
+        dense_ranks = {index: rank for rank, index in enumerate(search.dense_ranking or [], start=1)}
+        sparse_ranks = {index: rank for rank, index in enumerate(search.sparse_ranking or [], start=1)}
         return SearchDiagnostics(
-            dense_hits=dense_hits or 0,
-            sparse_hits=sparse_hits or 0,
-            fused_candidates=fused,
+            dense_hits=len(dense_ranks),
+            sparse_hits=len(sparse_ranks),
+            fused_candidates=len(search.candidates),
             reranked=[
                 RankedFragment(
                     chunk_index=c.chunk.chunk_index,
@@ -88,6 +87,8 @@ class AskQuestion:
                     page_to=c.chunk.page_to,
                     section=c.chunk.section,
                     rerank_score=round(c.score, 4),
+                    dense_rank=dense_ranks.get(c.chunk.chunk_index),
+                    sparse_rank=sparse_ranks.get(c.chunk.chunk_index),
                     used_in_context=c.chunk.chunk_index in in_context,
                 )
                 for c in reranked

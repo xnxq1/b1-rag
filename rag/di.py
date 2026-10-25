@@ -197,6 +197,7 @@ class AppProvider(Provider):
             sparse=sparse,
             vector_store=vector_store,
             embedding_batch_size=settings.embedding_batch_size,
+            max_pages=settings.max_pages,
         )
 
     @provide

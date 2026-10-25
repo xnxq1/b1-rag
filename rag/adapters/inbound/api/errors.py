@@ -13,7 +13,9 @@ from rag.domain.exceptions import (
     EmptyDocumentError,
     ExternalServiceUnavailableError,
     FileTooLargeError,
+    InvalidModelResponseError,
     TaskNotFoundError,
+    TooManyPagesError,
     UnsupportedFileTypeError,
 )
 
@@ -23,9 +25,11 @@ DOMAIN_ERROR_STATUSES: dict[type[DomainError], HTTPStatus] = {
     UnsupportedFileTypeError: HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
     FileTooLargeError: HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
     EmptyDocumentError: HTTPStatus.UNPROCESSABLE_ENTITY,
+    TooManyPagesError: HTTPStatus.UNPROCESSABLE_ENTITY,
     DocumentNotFoundError: HTTPStatus.NOT_FOUND,
     TaskNotFoundError: HTTPStatus.NOT_FOUND,
     ExternalServiceUnavailableError: HTTPStatus.SERVICE_UNAVAILABLE,
+    InvalidModelResponseError: HTTPStatus.BAD_GATEWAY,
 }
 
 

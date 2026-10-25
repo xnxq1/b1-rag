@@ -6,6 +6,7 @@ NOT_FOUND_MESSAGE = "В документе нет сведений, необхо
 
 _ELLIPSIS = re.compile(r"\.{3,}|…")
 _MIN_QUOTE_LEN = 8
+_MIN_QUOTE_WORDS = 2
 
 
 def not_found_answer() -> Answer:
@@ -17,15 +18,12 @@ def ground_answer(draft: AnswerDraft, context: list[ScoredChunk]) -> Answer:
         return not_found_answer()
 
     citations: list[Citation] = []
-    seen: set[tuple[int, int]] = set()
     for draft_citation in draft.citations:
         if not 1 <= draft_citation.fragment <= len(context):
             continue
         citation = _make_citation(context[draft_citation.fragment - 1], draft_citation.quote)
-        key = (citation.chunk_index, citation.char_start)
-        if key in seen:
+        if citation is None or any(_overlaps(citation, existing) for existing in citations):
             continue
-        seen.add(key)
         citations.append(citation)
 
     if not citations:
@@ -33,13 +31,16 @@ def ground_answer(draft: AnswerDraft, context: list[ScoredChunk]) -> Answer:
     return Answer(answer=draft.answer.strip(), found=True, citations=citations)
 
 
-def _make_citation(scored: ScoredChunk, quote: str) -> Citation:
+def _overlaps(a: Citation, b: Citation) -> bool:
+    return a.char_start < b.char_end and b.char_start < a.char_end
+
+
+def _make_citation(scored: ScoredChunk, quote: str) -> Citation | None:
     chunk = scored.chunk
     located = locate_quote(chunk.text, quote)
     if located is None:
-        start, end = 0, len(chunk.text)
-    else:
-        start, end = located
+        return None
+    start, end = located
     char_start, char_end = chunk.char_start + start, chunk.char_start + end
     return Citation(
         text=chunk.text[start:end],
@@ -56,11 +57,14 @@ def locate_quote(text: str, quote: str) -> tuple[int, int] | None:
     pieces = [p.strip() for p in _ELLIPSIS.split(quote) if p.strip()]
     if not pieces:
         return None
-    piece = max(pieces, key=len)
-    if len(piece) < _MIN_QUOTE_LEN:
-        return None
-    pattern = r"\s+".join(re.escape(word) for word in piece.split())
-    match = re.search(pattern, text, flags=re.IGNORECASE)
-    if match is None:
-        return None
-    return match.start(), match.end()
+    words = max(pieces, key=len).split()
+    for size in range(len(words), _MIN_QUOTE_WORDS - 1, -1):
+        for start in range(len(words) - size + 1):
+            window = words[start : start + size]
+            if len(" ".join(window)) < _MIN_QUOTE_LEN:
+                continue
+            pattern = r"\s+".join(re.escape(word) for word in window)
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match is not None:
+                return match.start(), match.end()
+    return None

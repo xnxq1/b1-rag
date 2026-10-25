@@ -207,26 +207,26 @@ class QdrantVectorStore:
             response = await fused
             return HybridSearchResult(candidates=self._to_scored(response.points))
 
-        response, dense_hits, sparse_hits = await asyncio.gather(
+        response, dense_ranking, sparse_ranking = await asyncio.gather(
             fused,
-            self._branch_hits(dense, DENSE_VECTOR, self._dense_limit, doc_filter),
-            self._branch_hits(sparse_query, SPARSE_VECTOR, self._sparse_limit, doc_filter)
+            self._branch_ranking(dense, DENSE_VECTOR, self._dense_limit, doc_filter),
+            self._branch_ranking(sparse_query, SPARSE_VECTOR, self._sparse_limit, doc_filter)
             if sparse.indices
-            else _zero(),
+            else _empty(),
         )
         return HybridSearchResult(
             candidates=self._to_scored(response.points),
-            dense_hits=dense_hits,
-            sparse_hits=sparse_hits,
+            dense_ranking=dense_ranking,
+            sparse_ranking=sparse_ranking,
         )
 
-    async def _branch_hits(
+    async def _branch_ranking(
         self,
         query: list[float] | models.SparseVector,
         using: str,
         limit: int,
         doc_filter: models.Filter,
-    ) -> int:
+    ) -> list[int]:
         response = await self._call(
             lambda: self._client.query_points(
                 self._collection,
@@ -234,10 +234,10 @@ class QdrantVectorStore:
                 using=using,
                 query_filter=doc_filter,
                 limit=limit,
-                with_payload=False,
+                with_payload=["chunk_index"],
             ),
         )
-        return len(response.points)
+        return [(point.payload or {})["chunk_index"] for point in response.points]
 
     async def _call[T](self, fn: Callable[[], Awaitable[T]]) -> T:
         return await self._retry.call(_SERVICE, fn, is_transient)
@@ -303,5 +303,5 @@ class QdrantVectorStore:
         return scored
 
 
-async def _zero() -> int:
-    return 0
+async def _empty() -> list[int]:
+    return []

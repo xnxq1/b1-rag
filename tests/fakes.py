@@ -6,8 +6,10 @@ from rag.application.ports import HybridSearchResult, SparseVector
 from rag.domain.entities import AnswerDraft, Chunk, Document, IndexingTask, ParsedDocument, ScoredChunk, TextSpan
 from rag.domain.exceptions import FileTooLargeError
 
+DOC_ID = "6c8b7861-4804-448b-a6f8-8cb4fd70d062"
 
-def make_chunk(index: int, text: str, doc_id: str = "doc-1", page: int | None = 1, section: str | None = None) -> Chunk:
+
+def make_chunk(index: int, text: str, doc_id: str = DOC_ID, page: int | None = 1, section: str | None = None) -> Chunk:
     return Chunk(
         doc_id=doc_id,
         doc_title="Договор поставки",
@@ -74,7 +76,8 @@ class FakeVectorStore:
     async def hybrid_search(self, doc_id, dense, sparse, limit, with_diagnostics=False) -> HybridSearchResult:
         candidates = [ScoredChunk(c, 1.0 / (i + 1)) for i, c in enumerate(self.candidates[:limit])]
         if with_diagnostics:
-            return HybridSearchResult(candidates, dense_hits=len(self.candidates), sparse_hits=1)
+            dense = [c.chunk_index for c in self.candidates]
+            return HybridSearchResult(candidates, dense_ranking=dense, sparse_ranking=dense[-1:])
         return HybridSearchResult(candidates)
 
 
@@ -157,10 +160,13 @@ class FakeStatuses:
 
 
 class FakeQueue:
-    def __init__(self) -> None:
+    def __init__(self, fail: Exception | None = None) -> None:
         self.enqueued: list[str] = []
+        self.fail = fail
 
     async def enqueue_indexing(self, task_id: str) -> None:
+        if self.fail:
+            raise self.fail
         self.enqueued.append(task_id)
 
 

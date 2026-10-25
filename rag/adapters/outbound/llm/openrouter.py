@@ -1,3 +1,5 @@
+import logging
+
 from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
@@ -6,7 +8,11 @@ from pydantic import BaseModel, Field, ValidationError
 from rag.adapters.outbound.llm.prompts import HUMAN_PROMPT, SYSTEM_PROMPT, format_fragment
 from rag.adapters.outbound.openai_errors import translate_openai_errors
 from rag.domain.entities import AnswerDraft, DraftCitation, ScoredChunk
-from rag.domain.exceptions import ExternalServiceUnavailableError
+from rag.domain.exceptions import InvalidModelResponseError
+
+logger = logging.getLogger(__name__)
+
+_PARSE_ATTEMPTS = 2
 
 
 class LLMCitation(BaseModel):
@@ -31,17 +37,21 @@ class LangChainAnswerGenerator:
             for i, c in enumerate(context, start=1)
         )
         variables = {"doc_title": context[0].chunk.doc_title, "fragments": fragments, "question": question}
-        try:
-            with translate_openai_errors("Языковая модель"):
-                result = await self._chain.ainvoke(variables)
-        except (OutputParserException, ValidationError) as exc:
-            msg = "Языковая модель вернула ответ в неверном формате, попробуйте ещё раз"
-            raise ExternalServiceUnavailableError(msg) from exc
-
-        if not isinstance(result, LLMAnswer):
-            result = LLMAnswer.model_validate(result)
-        return AnswerDraft(
-            found=result.found,
-            answer=result.answer,
-            citations=[DraftCitation(fragment=c.fragment, quote=c.quote) for c in result.citations],
-        )
+        for attempt in range(1, _PARSE_ATTEMPTS + 1):
+            try:
+                with translate_openai_errors("Языковая модель"):
+                    result = await self._chain.ainvoke(variables)
+                answer = result if isinstance(result, LLMAnswer) else LLMAnswer.model_validate(result)
+            except (OutputParserException, ValidationError) as exc:
+                if attempt == _PARSE_ATTEMPTS:
+                    msg = "Языковая модель вернула ответ в неверном формате"
+                    raise InvalidModelResponseError(msg) from exc
+                logger.warning("Ответ модели не прошёл валидацию, повтор: %s", exc)
+                continue
+            return AnswerDraft(
+                found=answer.found,
+                answer=answer.answer,
+                citations=[DraftCitation(fragment=c.fragment, quote=c.quote) for c in answer.citations],
+            )
+        msg = "Языковая модель не вернула ответ"
+        raise InvalidModelResponseError(msg)

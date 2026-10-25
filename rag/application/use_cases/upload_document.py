@@ -62,5 +62,6 @@ class UploadDocument:
             task.error = f"Не удалось поставить задачу в очередь: {exc}"
             task.updated_at = datetime.now(UTC)
             await self._statuses.save(task)
+            await self._storage.delete(stored_file_name(task))
             raise
         return task

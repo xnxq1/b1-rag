@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     rerank_model: str = Field(default="cohere/rerank-v3.5", alias="RERANK_MODEL")
     rerank_candidates: int = Field(default=30, ge=1, alias="RERANK_CANDIDATES")
     rerank_top_n: int = Field(default=5, ge=1, alias="RERANK_TOP_N")
-    rerank_min_score: float = Field(default=0.1, ge=0.0, le=1.0, alias="RERANK_MIN_SCORE")
+    rerank_min_score: float = Field(default=0.05, ge=0.0, le=1.0, alias="RERANK_MIN_SCORE")
     rerank_timeout_seconds: float = Field(default=30.0, alias="RERANK_TIMEOUT_SECONDS")
 
     search_fusion: Literal["rrf", "dbsf"] = Field(default="rrf", alias="SEARCH_FUSION")
@@ -59,6 +59,7 @@ class Settings(BaseSettings):
 
     storage_dir: Path = Field(default=ROOT_DIR / "data" / "uploads", alias="STORAGE_DIR")
     max_upload_bytes: int = Field(default=50 * 1024 * 1024, ge=1, alias="MAX_UPLOAD_BYTES")
+    max_pages: int = Field(default=100, ge=1, alias="MAX_PAGES")
 
     retry_attempts: int = Field(default=6, ge=1, alias="RETRY_ATTEMPTS")
     retry_max_wait_seconds: float = Field(default=10.0, alias="RETRY_MAX_WAIT_SECONDS")

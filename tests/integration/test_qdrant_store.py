@@ -70,9 +70,11 @@ async def test_hybrid_search_finds_exact_identifiers(store: QdrantVectorStore, b
         )
         assert result.candidates[0].chunk.chunk_index == expected, query
         assert {c.chunk.doc_id for c in result.candidates} == {"doc-a"}
-        assert result.dense_hits == len(TEXTS)
-        assert result.sparse_hits is not None
-        assert 1 <= result.sparse_hits < len(TEXTS)
+        assert result.dense_ranking is not None
+        assert len(result.dense_ranking) == len(TEXTS)
+        assert result.sparse_ranking is not None
+        assert 1 <= len(result.sparse_ranking) < len(TEXTS)
+        assert result.sparse_ranking[0] == expected
 
 
 async def test_payload_roundtrip_list_and_delete(store: QdrantVectorStore, bm25: FastEmbedBm25Encoder) -> None:
