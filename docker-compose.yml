@@ -1,0 +1,54 @@
+x-app: &app
+  build: .
+  image: b1-rag:latest
+  env_file: .env
+  environment:
+    QDRANT_URL: http://qdrant:6333
+    REDIS_URL: redis://redis:6379/0
+    STORAGE_DIR: /data/uploads
+  volumes:
+    - uploads:/data/uploads
+  depends_on:
+    qdrant:
+      condition: service_started
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    command: python manage.py start-api
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *app
+    command: python manage.py start-worker --concurrency=2
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  qdrant_data:
+  redis_data:
