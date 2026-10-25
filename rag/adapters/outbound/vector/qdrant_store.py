@@ -40,8 +40,15 @@ def is_transient(exc: BaseException) -> bool:
     return False
 
 
+_READY = models.FieldCondition(key="ready", match=models.MatchValue(value=True))
+
+
 def _doc_filter(doc_id: str) -> models.Filter:
     return models.Filter(must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))])
+
+
+def _ready_doc_filter(doc_id: str) -> models.Filter:
+    return models.Filter(must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id)), _READY])
 
 
 class QdrantVectorStore:
@@ -101,6 +108,7 @@ class QdrantVectorStore:
             "chunk_index": models.PayloadSchemaType.INTEGER,
             "section": models.PayloadSchemaType.KEYWORD,
             "page_from": models.PayloadSchemaType.INTEGER,
+            "ready": models.PayloadSchemaType.BOOL,
         }
         existing = info.payload_schema
         for field, schema in indexes.items():
@@ -133,17 +141,25 @@ class QdrantVectorStore:
         for start in range(0, len(points), self._batch_size):
             batch = points[start : start + self._batch_size]
             await self._call(partial(self._client.upsert, self._collection, points=batch, wait=True))
+        await self._publish(document.doc_id)
+
+    async def _publish(self, doc_id: str) -> None:
+        await self._call(
+            partial(self._client.set_payload, self._collection, payload={"ready": True}, points=_doc_filter(doc_id)),
+        )
 
     async def delete_document(self, doc_id: str) -> None:
         selector = models.FilterSelector(filter=_doc_filter(doc_id))
         await self._call(lambda: self._client.delete(self._collection, points_selector=selector, wait=True))
 
     async def document_exists(self, doc_id: str) -> bool:
-        result = await self._call(lambda: self._client.count(self._collection, count_filter=_doc_filter(doc_id)))
+        result = await self._call(lambda: self._client.count(self._collection, count_filter=_ready_doc_filter(doc_id)))
         return result.count > 0
 
     async def list_documents(self) -> list[Document]:
-        first_chunks = models.Filter(must=[models.FieldCondition(key="chunk_index", match=models.MatchValue(value=0))])
+        first_chunks = models.Filter(
+            must=[models.FieldCondition(key="chunk_index", match=models.MatchValue(value=0)), _READY],
+        )
         documents: list[Document] = []
         offset = None
         while True:
@@ -169,7 +185,7 @@ class QdrantVectorStore:
         limit: int,
         with_diagnostics: bool = False,
     ) -> HybridSearchResult:
-        doc_filter = _doc_filter(doc_id)
+        doc_filter = _ready_doc_filter(doc_id)
         prefetch = [models.Prefetch(query=dense, using=DENSE_VECTOR, limit=self._dense_limit, filter=doc_filter)]
         sparse_query = models.SparseVector(indices=sparse.indices, values=sparse.values)
         if sparse.indices:
@@ -242,6 +258,7 @@ class QdrantVectorStore:
             "text": chunk.text,
             "char_start": chunk.char_start,
             "char_end": chunk.char_end,
+            "ready": False,
             "page_marks": [
                 {"page": m.page, "char_start": m.char_start, "char_end": m.char_end} for m in chunk.page_marks
             ],

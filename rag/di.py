@@ -13,6 +13,7 @@ from rag.adapters.inbound.api.routers.health import HealthRouter
 from rag.adapters.inbound.api.routers.tasks import TasksRouter
 from rag.adapters.outbound.chunking.recursive import RecursiveChunker
 from rag.adapters.outbound.embeddings.openrouter import OpenRouterEmbeddings
+from rag.adapters.outbound.health import QdrantCheck, RedisCheck
 from rag.adapters.outbound.llm.openrouter import LangChainAnswerGenerator
 from rag.adapters.outbound.parsing.dispatcher import FileDocumentParser
 from rag.adapters.outbound.rerank.openrouter import OpenRouterReranker
@@ -249,8 +250,8 @@ class ApiProvider(Provider):
         return TasksRouter(get_indexing_status=get_indexing_status)
 
     @provide
-    def health_router(self) -> HealthRouter:
-        return HealthRouter()
+    def health_router(self, qdrant: AsyncQdrantClient, redis: Redis) -> HealthRouter:
+        return HealthRouter(checks=[QdrantCheck(qdrant), RedisCheck(redis)])
 
     @provide
     def app_builder(

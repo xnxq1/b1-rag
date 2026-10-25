@@ -4,6 +4,7 @@ from rag.application.use_cases import AskQuestion, GetIndexingStatus, IndexDocum
 from rag.domain.entities import AnswerDraft, DraftCitation, Heading, PageSpan, ParsedDocument, TaskStatus
 from rag.domain.exceptions import (
     DocumentNotFoundError,
+    ExternalServiceUnavailableError,
     FileTooLargeError,
     TaskNotFoundError,
     UnsupportedFileTypeError,
@@ -113,7 +114,7 @@ def parsed_document() -> ParsedDocument:
     )
 
 
-async def make_index_case(store: FakeVectorStore) -> tuple[IndexDocument, FakeStatuses, str]:
+async def make_index_case(store: FakeVectorStore) -> tuple[IndexDocument, FakeStatuses, str, FakeStorage]:
     storage, statuses, queue = FakeStorage(), FakeStatuses(), FakeQueue()
     task = await upload_use_case(storage, statuses, queue).execute("Договор.pdf", bytes_stream(b"%PDF"))
     use_case = IndexDocument(
@@ -126,12 +127,12 @@ async def make_index_case(store: FakeVectorStore) -> tuple[IndexDocument, FakeSt
         vector_store=store,
         embedding_batch_size=2,
     )
-    return use_case, statuses, task.task_id
+    return use_case, statuses, task.task_id, storage
 
 
 async def test_index_document_writes_chunks_with_layout() -> None:
     store = FakeVectorStore()
-    use_case, statuses, task_id = await make_index_case(store)
+    use_case, statuses, task_id, storage = await make_index_case(store)
 
     await use_case.execute(task_id)
 
@@ -142,6 +143,7 @@ async def test_index_document_writes_chunks_with_layout() -> None:
     assert task.chunks_total == len(chunks) == store.documents[task_id].chunks_total
     last = chunks[-1]
     assert (last.page_to, last.section) == (2, "4.2 Штрафные санкции")
+    assert storage.files == {}
     stages = [stage for _, stage in statuses.history]
     assert stages.index("parsing") < stages.index("embedding") < stages.index("upserting") < stages.index("done")
 
@@ -149,7 +151,7 @@ async def test_index_document_writes_chunks_with_layout() -> None:
 async def test_index_failure_marks_task_failed_and_cleans_up() -> None:
     store = FakeVectorStore()
     store.fail_upsert = RuntimeError("qdrant down")
-    use_case, statuses, task_id = await make_index_case(store)
+    use_case, statuses, task_id, storage = await make_index_case(store)
 
     with pytest.raises(RuntimeError):
         await use_case.execute(task_id)
@@ -158,6 +160,7 @@ async def test_index_failure_marks_task_failed_and_cleans_up() -> None:
     assert task.status == TaskStatus.FAILED
     assert "qdrant down" in (task.error or "")
     assert store.deleted == [task_id]
+    assert storage.files == {}
 
 
 @pytest.mark.parametrize(
@@ -171,3 +174,36 @@ async def test_index_failure_marks_task_failed_and_cleans_up() -> None:
 )
 def test_file_too_large_message(max_bytes: int, message: str) -> None:
     assert FileTooLargeError.for_limit(max_bytes).message == message
+
+
+async def test_transient_failure_before_last_attempt_requeues_task() -> None:
+    store = FakeVectorStore()
+    store.fail_upsert = ExternalServiceUnavailableError("Сервис эмбеддингов временно недоступен")
+    use_case, statuses, task_id, storage = await make_index_case(store)
+
+    with pytest.raises(ExternalServiceUnavailableError):
+        await use_case.execute(task_id, last_attempt=False)
+
+    task = statuses.tasks[task_id]
+    assert (task.status, task.stage, task.progress) == (TaskStatus.QUEUED, "queued", 0.0)
+    assert task.error == "Временная ошибка, задача будет повторена: Сервис эмбеддингов временно недоступен"
+    assert store.deleted == [task_id]
+    assert len(storage.files) == 1
+
+    store.fail_upsert = None
+    await use_case.execute(task_id, last_attempt=True)
+    assert statuses.tasks[task_id].status == TaskStatus.DONE
+    assert statuses.tasks[task_id].error is None
+    assert storage.files == {}
+
+
+async def test_transient_failure_on_last_attempt_fails_task() -> None:
+    store = FakeVectorStore()
+    store.fail_upsert = ExternalServiceUnavailableError("Сервис эмбеддингов временно недоступен")
+    use_case, statuses, task_id, storage = await make_index_case(store)
+
+    with pytest.raises(ExternalServiceUnavailableError):
+        await use_case.execute(task_id, last_attempt=True)
+
+    assert statuses.tasks[task_id].status == TaskStatus.FAILED
+    assert storage.files == {}

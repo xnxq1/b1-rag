@@ -12,7 +12,7 @@ from rag.application.ports import (
 )
 from rag.application.use_cases.upload_document import stored_file_name
 from rag.domain.entities import Document, IndexingStage, IndexingTask, TaskStatus
-from rag.domain.exceptions import DomainError, EmptyDocumentError, TaskNotFoundError
+from rag.domain.exceptions import DomainError, EmptyDocumentError, ExternalServiceUnavailableError, TaskNotFoundError
 from rag.domain.layout import build_chunks
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class IndexDocument:
         self._vector_store = vector_store
         self._batch_size = embedding_batch_size
 
-    async def execute(self, task_id: str) -> None:
+    async def execute(self, task_id: str, last_attempt: bool = True) -> None:
         task = await self._statuses.get(task_id)
         if task is None:
             msg = f"Задача {task_id} не найдена"
@@ -52,13 +52,21 @@ class IndexDocument:
 
         try:
             await self._index(task)
-        except Exception as exc:
-            logger.exception("Индексация документа %s завершилась ошибкой", task.doc_id)
+        except ExternalServiceUnavailableError as exc:
             await self._cleanup(task.doc_id)
-            task.status = TaskStatus.FAILED
-            task.error = exc.message if isinstance(exc, DomainError) else f"{type(exc).__name__}: {exc}"[:500]
-            await self._save(task)
+            if last_attempt:
+                await self._fail(task, exc)
+            else:
+                logger.warning(
+                    "Индексация документа %s: временная ошибка, задача будет повторена: %s", task.doc_id, exc
+                )
+                await self._requeue(task, exc)
             raise
+        except Exception as exc:
+            await self._cleanup(task.doc_id)
+            await self._fail(task, exc)
+            raise
+        await self._delete_source(task)
 
     async def _index(self, task: IndexingTask) -> None:
         task.status = TaskStatus.RUNNING
@@ -109,6 +117,26 @@ class IndexDocument:
     async def _save(self, task: IndexingTask) -> None:
         task.updated_at = datetime.now(UTC)
         await self._statuses.save(task)
+
+    async def _fail(self, task: IndexingTask, exc: Exception) -> None:
+        logger.error("Индексация документа %s завершилась ошибкой", task.doc_id, exc_info=exc)
+        task.status = TaskStatus.FAILED
+        task.error = exc.message if isinstance(exc, DomainError) else f"{type(exc).__name__}: {exc}"[:500]
+        await self._save(task)
+        await self._delete_source(task)
+
+    async def _requeue(self, task: IndexingTask, exc: ExternalServiceUnavailableError) -> None:
+        task.status = TaskStatus.QUEUED
+        task.stage = IndexingStage.QUEUED
+        task.progress = 0.0
+        task.error = f"Временная ошибка, задача будет повторена: {exc.message}"
+        await self._save(task)
+
+    async def _delete_source(self, task: IndexingTask) -> None:
+        try:
+            await self._storage.delete(stored_file_name(task))
+        except Exception:
+            logger.exception("Не удалось удалить исходный файл документа %s", task.doc_id)
 
     async def _cleanup(self, doc_id: str) -> None:
         try:

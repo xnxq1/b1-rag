@@ -59,7 +59,7 @@ async def client(storage: FakeStorage, queue: FakeQueue) -> AsyncIterator[AsyncC
             ask_question=ask,
         ),
         TasksRouter(get_indexing_status=GetIndexingStatus(statuses)),
-        HealthRouter(),
+        HealthRouter(checks=[]),
     ]
     app = AppBuilder(routers=routers, vector_store=store, max_upload_bytes=1024).create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -138,3 +138,37 @@ def test_every_domain_error_has_http_status() -> None:
         cls for cls in vars(exceptions).values() if isinstance(cls, type) and issubclass(cls, exceptions.DomainError)
     }
     assert domain_errors - {exceptions.DomainError} == set(DOMAIN_ERROR_STATUSES)
+
+
+class StubCheck:
+    def __init__(self, name: str, result: bool | Exception) -> None:
+        self.name = name
+        self._result = result
+
+    async def is_available(self) -> bool:
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
+
+async def health_client(*checks: StubCheck) -> AsyncClient:
+    app = AppBuilder(
+        routers=[HealthRouter(checks=list(checks), timeout_seconds=0.5)],
+        vector_store=FakeVectorStore(),
+        max_upload_bytes=1024,
+    ).create_app()
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def test_health_ok() -> None:
+    async with await health_client(StubCheck("qdrant", True), StubCheck("redis", True)) as c:
+        response = await c.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "components": {"qdrant": True, "redis": True}}
+
+
+async def test_health_reports_unavailable_component() -> None:
+    async with await health_client(StubCheck("qdrant", True), StubCheck("redis", ConnectionError("down"))) as c:
+        response = await c.get("/api/health")
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable", "components": {"qdrant": True, "redis": False}}

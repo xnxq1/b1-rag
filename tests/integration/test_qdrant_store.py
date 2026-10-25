@@ -106,3 +106,27 @@ async def test_dimension_mismatch_is_reported(qdrant_client: AsyncQdrantClient, 
     )
     with pytest.raises(RuntimeError, match="EMBEDDING_DIM"):
         await other.ensure_collection()
+
+
+async def test_document_is_invisible_until_all_points_are_written(
+    store: QdrantVectorStore,
+    bm25: FastEmbedBm25Encoder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publish = store._publish
+
+    async def skip_publish(doc_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(store, "_publish", skip_publish)
+    await index(store, bm25, "doc-a", TEXTS)
+
+    assert not await store.document_exists("doc-a")
+    assert await store.list_documents() == []
+    result = await store.hybrid_search("doc-a", fake_dense("x"), await bm25.encode_query("неустойка"), limit=10)
+    assert result.candidates == []
+
+    await publish("doc-a")
+
+    assert await store.document_exists("doc-a")
+    assert [d.doc_id for d in await store.list_documents()] == ["doc-a"]

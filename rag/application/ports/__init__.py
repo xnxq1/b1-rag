@@ -1,4 +1,5 @@
 from rag.application.ports.embeddings import EmbeddingsPort
+from rag.application.ports.health import DependencyCheckPort
 from rag.application.ports.llm import AnswerGeneratorPort
 from rag.application.ports.parsing import ChunkerPort, DocumentParserPort
 from rag.application.ports.reranker import RerankerPort
@@ -10,6 +11,7 @@ from rag.application.ports.vector_store import HybridSearchResult, VectorStorePo
 __all__ = [
     "AnswerGeneratorPort",
     "ChunkerPort",
+    "DependencyCheckPort",
     "DocumentParserPort",
     "EmbeddingsPort",
     "FileStoragePort",

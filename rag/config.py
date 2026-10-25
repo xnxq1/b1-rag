@@ -60,8 +60,12 @@ class Settings(BaseSettings):
     storage_dir: Path = Field(default=ROOT_DIR / "data" / "uploads", alias="STORAGE_DIR")
     max_upload_bytes: int = Field(default=50 * 1024 * 1024, ge=1, alias="MAX_UPLOAD_BYTES")
 
-    retry_attempts: int = Field(default=4, ge=1, alias="RETRY_ATTEMPTS")
+    retry_attempts: int = Field(default=6, ge=1, alias="RETRY_ATTEMPTS")
     retry_max_wait_seconds: float = Field(default=10.0, alias="RETRY_MAX_WAIT_SECONDS")
+
+    index_task_max_retries: int = Field(default=4, ge=0, alias="INDEX_TASK_MAX_RETRIES")
+    index_task_retry_backoff_seconds: int = Field(default=30, ge=1, alias="INDEX_TASK_RETRY_BACKOFF_SECONDS")
+    index_task_retry_max_backoff_seconds: int = Field(default=600, ge=1, alias="INDEX_TASK_RETRY_MAX_BACKOFF_SECONDS")
 
 
 def load_settings() -> Settings:

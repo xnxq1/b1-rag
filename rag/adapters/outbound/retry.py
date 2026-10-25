@@ -21,7 +21,7 @@ class RetryPolicy:
     ) -> T:
         retrying = AsyncRetrying(
             stop=stop_after_attempt(self._attempts),
-            wait=wait_exponential_jitter(initial=0.5, max=self._max_wait),
+            wait=wait_exponential_jitter(multiplier=0.5, max=self._max_wait),
             retry=retry_if_exception(is_transient),
             before_sleep=lambda state: logger.warning(
                 "%s: временная ошибка, попытка %d/%d: %r",
